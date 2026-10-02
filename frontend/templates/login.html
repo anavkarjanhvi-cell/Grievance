@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/my-complaints">My Complaints</a>
+      <a href="/map">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="auth-container">
+    <div class="auth-card">
+      <h1>Welcome Back</h1>
+      <p class="auth-subtitle">Login to track complaints or register a new account</p>
+
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">Login</div>
+        <div class="auth-tab" id="tab-register" onclick="switchTab('register')">Register</div>
+      </div>
+
+      <!-- LOGIN FORM -->
+      <form id="login-form" onsubmit="doLogin(event)">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" class="form-control" id="login-username" required placeholder="Enter username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" class="form-control" id="login-password" required placeholder="Enter password">
+        </div>
+        <button type="submit" class="btn btn-primary" id="login-btn" style="width:100%;">
+          Login →
+        </button>
+      </form>
+
+      <!-- REGISTER FORM -->
+      <form id="register-form" onsubmit="doRegister(event)" style="display:none;">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" class="form-control" id="reg-name" required placeholder="Your full name">
+        </div>
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" class="form-control" id="reg-username" required placeholder="Choose a username">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" class="form-control" id="reg-email" required placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="tel" class="form-control" id="reg-phone" placeholder="+91 98765 43210">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" class="form-control" id="reg-password" required placeholder="Min 6 characters">
+        </div>
+        <div class="form-group">
+          <label>Register as</label>
+          <select class="form-control" id="reg-role">
+            <option value="citizen">Citizen</option>
+            <option value="admin">Admin / Authority</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" id="register-btn" style="width:100%;">
+          Create Account →
+        </button>
+      </form>
+
+      <div class="auth-info">
+        <strong>Demo Admin Account:</strong><br>
+        Username: <code>admin</code> &nbsp; Password: <code>admin123</code>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    function switchTab(tab) {
+      document.getElementById("tab-login").classList.toggle("active", tab === "login");
+      document.getElementById("tab-register").classList.toggle("active", tab === "register");
+      document.getElementById("login-form").style.display = tab === "login" ? "block" : "none";
+      document.getElementById("register-form").style.display = tab === "register" ? "block" : "none";
+    }
+
+    async function doLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById("login-btn");
+      btn.innerHTML = '<span class="loader"></span> Logging in...';
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("login-username").value,
+            password: document.getElementById("login-password").value,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Login failed");
+        }
+        const data = await res.json();
+        Auth.set(data.access_token, data.user);
+        window.location.href = data.user.role === "admin" ? "/dashboard" : "/";
+      } catch (err) {
+        alert("Login failed: " + err.message);
+      } finally {
+        btn.innerHTML = "Login →";
+        btn.disabled = false;
+      }
+    }
+
+    async function doRegister(e) {
+      e.preventDefault();
+      const btn = document.getElementById("register-btn");
+      btn.innerHTML = '<span class="loader"></span> Creating...';
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: document.getElementById("reg-name").value,
+            username: document.getElementById("reg-username").value,
+            email: document.getElementById("reg-email").value,
+            phone: document.getElementById("reg-phone").value,
+            password: document.getElementById("reg-password").value,
+            role: document.getElementById("reg-role").value,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Registration failed");
+        }
+        const data = await res.json();
+        Auth.set(data.access_token, data.user);
+        window.location.href = data.user.role === "admin" ? "/dashboard" : "/";
+      } catch (err) {
+        alert("Registration failed: " + err.message);
+      } finally {
+        btn.innerHTML = "Create Account →";
+        btn.disabled = false;
+      }
+    }
+
+    // If already logged in, redirect
+    if (Auth.isLoggedIn()) {
+      const user = Auth.getUser();
+      window.location.href = user && user.role === "admin" ? "/dashboard" : "/";
+    }
+  </script>
+</body>
+</html>

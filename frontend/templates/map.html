@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GIS Map — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/my-complaints">My Complaints</a>
+      <a href="/map" class="active">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>🗺️ GIS Hotspot Map</h1>
+      <p>Geographical visualization of complaint density. Clusters detected by DBSCAN highlight areas needing urgent attention.</p>
+    </div>
+
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div id="map-container"></div>
+    </div>
+
+    <div class="map-legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Urgent</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> High</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> Normal</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#6b7280;"></span> Low</div>
+      <div class="legend-item"><span class="legend-dot" style="background:rgba(79,70,229,0.3); border:2px solid var(--primary); width:20px; height:20px;"></span> Hotspot Area</div>
+    </div>
+
+    <div class="card" style="margin-top:24px;">
+      <div class="card-title"><span class="icon">📍</span> Detected Hotspots (DBSCAN Clustering)</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Cluster ID</th><th>Complaints</th><th>Center (Lat, Lng)</th><th>Action</th></tr></thead>
+          <tbody id="hotspot-list"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    const PRIORITY_COLORS = { Urgent:'#ef4444', High:'#f59e0b', Normal:'#10b981', Low:'#6b7280' };
+    let mainMap = L.map('map-container').setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: 'OpenStreetMap',
+      maxZoom: 18,
+    }).addTo(mainMap);
+    let markersLayer = L.layerGroup().addTo(mainMap);
+    let hotspotsLayer = L.layerGroup().addTo(mainMap);
+
+    async function loadMap() {
+      const data = await api('/map-data');
+      const analytics = await api('/analytics');
+
+      markersLayer.clearLayers();
+      hotspotsLayer.clearLayers();
+
+      analytics.top_hotspots.forEach(h => {
+        L.circle([h.lat, h.lng], {
+          radius: Math.max(h.count * 2500, 2000),
+          color: 'var(--primary)',
+          fillColor: '#4f46e5',
+          fillOpacity: 0.12,
+          weight: 2,
+        }).addTo(hotspotsLayer);
+      });
+
+      data.points.forEach(p => {
+        const color = PRIORITY_COLORS[p.priority] || '#6b7280';
+        const marker = L.circleMarker([p.lat, p.lng], {
+          radius: p.priority === 'Urgent' ? 10 : 8,
+          fillColor: color,
+          color: '#fff',
+          weight: 2,
+          fillOpacity: 0.9,
+        });
+        marker.bindPopup(`
+          <div style="min-width:220px; font-family:Inter,sans-serif;">
+            <div style="font-weight:800; font-size:1rem; margin-bottom:4px;">Complaint #${p.id}</div>
+            <div style="font-size:0.85rem; color:#374151; margin-bottom:8px;">${escapeHtml(p.text.substring(0,120))}${p.text.length>120?'...':''}</div>
+            <div style="border-top:1px solid #e5e7eb; padding-top:6px; font-size:0.8rem;">
+              <div><strong>Dept:</strong> ${p.department.replace(/_/g,' ')}</div>
+              <div><strong>Priority:</strong> <span style="color:${color}; font-weight:700;">${p.priority}</span></div>
+              <div><strong>City:</strong> ${p.city || 'N/A'}</div>
+              <div><strong>Status:</strong> ${p.status}</div>
+              ${p.is_duplicate ? '<div style="color:#f59e0b; font-weight:600; margin-top:4px;">⚠️ Duplicate complaint</div>' : ''}
+            </div>
+          </div>
+        `);
+        marker.addTo(markersLayer);
+      });
+
+      if (data.points.length > 0) {
+        const bounds = L.latLngBounds(data.points.map(p => [p.lat, p.lng]));
+        mainMap.fitBounds(bounds, { padding: [50, 50] });
+      }
+
+      document.getElementById('hotspot-list').innerHTML = analytics.top_hotspots.length
+        ? analytics.top_hotspots.map(h => `
+          <tr>
+            <td><strong>Cluster #${h.cluster_id}</strong></td>
+            <td><strong>${h.count}</strong> complaints</td>
+            <td>${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="mainMap.setView([${h.lat}, ${h.lng}], 12);">Zoom In →</button></td>
+          </tr>`).join('')
+        : '<tr><td colspan="4" class="empty-state"><div class="empty-icon">📍</div>No hotspots detected.</td></tr>';
+    }
+
+    loadMap();
+  </script>
+</body>
+</html>

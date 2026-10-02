@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/queue">Priority Queue</a>
+      <a href="/dashboard" class="active">Dashboard</a>
+      <a href="/analytics">Analytics</a>
+      <a href="/map">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>📊 Authority Dashboard</h1>
+      <p>Manage and track all grievances. AI-powered classification, prioritization, and duplicate detection.</p>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-label">Total Complaints</div>
+      </div>
+      <div class="stat-card urgent">
+        <div class="stat-icon">🔴</div>
+        <div class="stat-value" id="stat-urgent">—</div>
+        <div class="stat-label">Urgent</div>
+      </div>
+      <div class="stat-card high">
+        <div class="stat-icon">🟡</div>
+        <div class="stat-value" id="stat-high">—</div>
+        <div class="stat-label">High Priority</div>
+      </div>
+      <div class="stat-card duplicate">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-value" id="stat-dups">—</div>
+        <div class="stat-label">Duplicates Detected</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">📋</span> All Complaints</div>
+      <div class="filters">
+        <select id="filter-dept"><option value="">All Departments</option></select>
+        <select id="filter-priority">
+          <option value="">All Priorities</option>
+          <option>Urgent</option><option>High</option><option>Normal</option><option>Low</option>
+        </select>
+        <select id="filter-status">
+          <option value="">All Statuses</option>
+          <option>Submitted</option><option>Acknowledged</option><option>In Progress</option><option>Resolved</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="loadComplaints()">🔄 Refresh</button>
+        <a href="/api/report" class="btn-export">📥 Export Report</a>
+        <a href="/queue" class="btn btn-primary btn-sm">⚡ View Priority Queue</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Complaint</th><th>Department</th><th>Priority</th>
+              <th>Location</th><th>Status</th><th>Dup</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="complaints-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Message Modal -->
+  <div id="msg-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:var(--radius-lg); padding:24px; width:90%; max-width:480px; max-height:80vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="font-size:1.1rem; font-weight:700;">💬 Messages</h3>
+        <button class="btn btn-secondary btn-sm" onclick="closeMsgModal()">✕ Close</button>
+      </div>
+      <div id="msg-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    async function loadAnalytics() {
+      const data = await api('/analytics');
+      document.getElementById('stat-total').textContent = data.total;
+      document.getElementById('stat-urgent').textContent = data.by_priority.Urgent || 0;
+      document.getElementById('stat-high').textContent = data.by_priority.High || 0;
+      document.getElementById('stat-dups').textContent = data.duplicates_detected;
+    }
+
+    async function loadComplaints() {
+      const tbody = document.getElementById('complaints-tbody');
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;"><span class="loader"></span></td></tr>';
+      const dept = document.getElementById('filter-dept').value;
+      const priority = document.getElementById('filter-priority').value;
+      const status = document.getElementById('filter-status').value;
+      let path = '/complaints?';
+      if (dept) path += `department=${encodeURIComponent(dept)}&`;
+      if (priority) path += `priority=${encodeURIComponent(priority)}&`;
+      if (status) path += `status=${encodeURIComponent(status)}&`;
+
+      const items = await api(path);
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><div class="empty-icon">📭</div>No complaints found.</td></tr>';
+        return;
+      }
+      const PRIORITY_ICON = {Urgent:'🔴', High:'🟡', Normal:'🟢', Low:'⚪'};
+      tbody.innerHTML = items.map(c => `
+        <tr>
+          <td><strong>#${c.id}</strong></td>
+          <td style="max-width:280px;">
+            <div style="font-weight:600;">${escapeHtml(c.original_text.substring(0, 80))}${c.original_text.length > 80 ? '...' : ''}</div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">${formatDate(c.created_at)}</div>
+          </td>
+          <td>${c.department.replace(/_/g, ' ')}</td>
+          <td>
+            <span class="badge badge-${c.priority_label.toLowerCase()}">${PRIORITY_ICON[c.priority_label]||''} ${c.priority_label}</span>
+            <div class="score-bar-container" style="width:60px; margin-top:4px;">
+              <div class="score-bar" style="width:${c.priority_score}%; background:${c.priority_label==='Urgent'?'var(--urgent)':c.priority_label==='High'?'var(--high)':c.priority_label==='Normal'?'var(--normal)':'var(--low)'};"></div>
+            </div>
+          </td>
+          <td>${c.city || '—'}<br><span style="font-size:0.72rem; color:var(--text-muted);">${c.locality || ''}</span></td>
+          <td><span class="badge badge-status">${c.status}</span></td>
+          <td>${c.duplicate_of ? `<span class="duplicate-tag">Dup #${c.duplicate_of}</span>` : '—'}</td>
+          <td>
+            <select class="status-select" onchange="updateStatus(${c.id}, this.value)">
+              <option ${c.status==='Submitted'?'selected':''}>Submitted</option>
+              <option ${c.status==='Acknowledged'?'selected':''}>Acknowledged</option>
+              <option ${c.status==='In Progress'?'selected':''}>In Progress</option>
+              <option ${c.status==='Resolved'?'selected':''}>Resolved</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" style="margin-top:4px; width:100%;" onclick="openMessages(${c.id})">💬 Message</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function updateStatus(id, status) {
+      try {
+        await api(`/complaints/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        loadComplaints();
+        loadAnalytics();
+      } catch(err) {
+        alert('Failed: ' + err.message + '. Admin login required to change status.');
+      }
+    }
+
+    // ---- Messages modal ----
+    let currentMsgComplaintId = null;
+
+    async function openMessages(complaintId) {
+      currentMsgComplaintId = complaintId;
+      const modal = document.getElementById('msg-modal');
+      const body = document.getElementById('msg-modal-body');
+      modal.style.display = 'flex';
+      body.innerHTML = '<span class="loader"></span> Loading messages...';
+      try {
+        const msgs = await api(`/complaints/${complaintId}/messages`);
+        if (!msgs.length) {
+          body.innerHTML = '<div class="empty-state"><div class="empty-icon">💬</div>No messages yet. Send the first message below.</div>';
+        } else {
+          body.innerHTML = msgs.map(m => `
+            <div style="margin-bottom:10px; padding:10px 14px; border-radius:8px; font-size:0.85rem; ${
+              m.sender_role === 'admin'
+              ? 'background:var(--primary-light); border-left:3px solid var(--primary);'
+              : 'background:var(--low-bg); border-left:3px solid var(--low); margin-left:24px;'
+            }">
+              <div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin-bottom:4px;">
+                ${m.sender_role === 'admin' ? '👑' : '👤'} ${m.sender_name} · ${formatDate(m.created_at)}
+              </div>
+              ${escapeHtml(m.text)}
+            </div>
+          `).join('');
+        }
+        body.innerHTML += `
+          <div style="display:flex; gap:8px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+            <input type="text" class="form-control" id="admin-msg-input" placeholder="Type message to citizen..." style="flex:1; padding:8px 12px; font-size:0.85rem;">
+            <button class="btn btn-primary btn-sm" onclick="sendAdminMsg()">Send</button>
+          </div>
+        `;
+        document.getElementById('admin-msg-input').addEventListener('keypress', e => {
+          if (e.key === 'Enter') sendAdminMsg();
+        });
+      } catch(err) {
+        body.innerHTML = '<div class="alert alert-warning">Failed to load: ' + err.message + '</div>';
+      }
+    }
+
+    async function sendAdminMsg() {
+      const input = document.getElementById('admin-msg-input');
+      const text = input.value.trim();
+      if (!text || !currentMsgComplaintId) return;
+      try {
+        await fetch(`/api/complaints/${currentMsgComplaintId}/messages?text=${encodeURIComponent(text)}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${Auth.getToken()}` },
+        });
+        openMessages(currentMsgComplaintId);
+      } catch(err) {
+        alert('Failed to send: ' + err.message);
+      }
+    }
+
+    function closeMsgModal() {
+      document.getElementById('msg-modal').style.display = 'none';
+    }
+
+    async function initDeptFilter() {
+      const data = await api('/analytics');
+      Object.keys(data.by_department).forEach(d => {
+        if (data.by_department[d] > 0) {
+          const opt = document.createElement('option');
+          opt.value = d; opt.textContent = d.replace(/_/g, ' ');
+          document.getElementById('filter-dept').appendChild(opt);
+        }
+      });
+    }
+
+    ['filter-dept', 'filter-priority', 'filter-status'].forEach(id =>
+      document.getElementById(id).addEventListener('change', loadComplaints)
+    );
+
+    loadAnalytics();
+    initDeptFilter();
+    loadComplaints();
+  </script>
+</body>
+</html>

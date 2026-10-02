@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Complaints — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/my-complaints" class="active">My Complaints</a>
+      <a href="/map">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>📋 My Complaints</h1>
+      <p>Track your submitted complaints, view status updates, and read messages from authorities.</p>
+    </div>
+
+    <div id="complaints-container">
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <div>Loading your complaints...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    const PRIORITY_ICON = {Urgent:'🔴', High:'🟡', Normal:'🟢', Low:'⚪'};
+
+    async function loadComplaints() {
+      const container = document.getElementById('complaints-container');
+      try {
+        const data = await api('/my-complaints');
+        if (!data.complaints.length) {
+          container.innerHTML = `
+            <div class="card">
+              <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <div>You haven't submitted any complaints yet.</div>
+                <a href="/" class="btn btn-primary btn-sm" style="margin-top:12px;">Submit Your First Complaint →</a>
+              </div>
+            </div>`;
+          return;
+        }
+        container.innerHTML = data.complaints.map(c => renderComplaint(c)).join('');
+      } catch (err) {
+        container.innerHTML = `
+          <div class="card">
+            <div class="alert alert-warning">
+              Please <a href="/login" style="color:var(--primary); font-weight:700;">login</a> to view your complaints.
+            </div>
+          </div>`;
+      }
+    }
+
+    function renderComplaint(c) {
+      let attachHtml = '';
+      if (c.attachments) {
+        try {
+          const atts = JSON.parse(c.attachments);
+          if (atts && atts.length) {
+            attachHtml = `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+              ${atts.map(a => a.type === 'image' ? `<img src="${a.url}" style="width:60px;height:60px;border-radius:6px;object-fit:cover;">` : `<span style="font-size:1.5rem;">🎬</span>`).join('')}
+            </div>`;
+          }
+        } catch(e) {}
+      }
+
+      const messagesHtml = c.messages.length ? `
+        <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+          <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:8px;">💬 Messages</div>
+          ${c.messages.map(m => `
+            <div style="margin-bottom:8px; padding:10px 14px; border-radius:8px; font-size:0.85rem; ${
+              m.sender_role === 'admin'
+              ? 'background:var(--primary-light); border-left:3px solid var(--primary);'
+              : 'background:var(--low-bg); border-left:3px solid var(--low); margin-left:24px;'
+            }">
+              <div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin-bottom:4px;">
+                ${m.sender_role === 'admin' ? '👑' : '👤'} ${m.sender_name} · ${formatDate(m.created_at)}
+              </div>
+              ${escapeHtml(m.text)}
+            </div>
+          `).join('')}
+        </div>
+      ` : '<div style="margin-top:12px; font-size:0.8rem; color:var(--text-light); border-top:1px solid var(--border); padding-top:12px;">No messages yet. Authorities may respond here.</div>';
+
+      const scoreColor = c.priority_label === 'Urgent' ? 'var(--urgent)' :
+                         c.priority_label === 'High' ? 'var(--high)' :
+                         c.priority_label === 'Normal' ? 'var(--normal)' : 'var(--low)';
+
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+            <div style="flex:1; min-width:200px;">
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:4px;">
+                <strong>Complaint #${c.id}</strong> · ${formatDate(c.created_at)}
+                ${c.duplicate_of ? `· <span class="duplicate-tag">Dup of #${c.duplicate_of}</span>` : ''}
+              </div>
+              <div style="font-weight:600; font-size:0.95rem; margin-bottom:6px;">${escapeHtml(c.text)}</div>
+              <div style="font-size:0.8rem; color:var(--text-muted);">
+                ${c.department.replace(/_/g,' ')} · ${c.city || 'N/A'} · ${c.locality || ''}
+              </div>
+              ${attachHtml}
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+              <span class="badge badge-${c.priority_label.toLowerCase()}">${PRIORITY_ICON[c.priority_label]||''} ${c.priority_label}</span>
+              <span style="font-size:0.72rem; color:var(--text-muted); font-weight:700;">${c.priority_score}/100</span>
+              <div class="score-bar-container" style="width:80px;">
+                <div class="score-bar" style="width:${c.priority_score}%; background:${scoreColor};"></div>
+              </div>
+              <span class="badge badge-status">${c.status}</span>
+            </div>
+          </div>
+          ${messagesHtml}
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <input type="text" class="form-control" id="reply-input-${c.id}" placeholder="Reply to authorities..." style="flex:1; padding:8px 12px; font-size:0.85rem;">
+            <button class="btn btn-primary btn-sm" onclick="sendReply(${c.id})">Send Reply</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function sendReply(complaintId) {
+      const input = document.getElementById(`reply-input-${complaintId}`);
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        await fetch(`/api/complaints/${complaintId}/messages?text=${encodeURIComponent(text)}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${Auth.getToken()}` },
+        });
+        input.value = '';
+        loadComplaints();
+      } catch (err) {
+        alert('Failed to send: ' + err.message);
+      }
+    }
+
+    loadComplaints();
+  </script>
+</body>
+</html>

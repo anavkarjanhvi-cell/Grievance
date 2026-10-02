@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/queue">Priority Queue</a>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/analytics" class="active">Analytics</a>
+      <a href="/map">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>📈 Analytics & Insights</h1>
+      <p>AI-generated insights on complaint distribution, priority breakdown, and duplicate clusters.</p>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-label">Total Complaints</div>
+      </div>
+      <div class="stat-card urgent">
+        <div class="stat-icon">🔴</div>
+        <div class="stat-value" id="stat-urgent">—</div>
+        <div class="stat-label">Urgent</div>
+      </div>
+      <div class="stat-card normal">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value" id="stat-resolved">—</div>
+        <div class="stat-label">Resolved</div>
+      </div>
+      <div class="stat-card duplicate">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-value" id="stat-dup-groups">—</div>
+        <div class="stat-label">Duplicate Clusters</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="icon">🏢</span> Complaints by Department</div>
+        <div class="chart-container">
+          <div class="bar-chart" id="dept-chart"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="icon">⚡</span> Priority Distribution</div>
+        <div class="chart-container">
+          <div class="bar-chart" id="priority-chart"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">📊</span> Status Breakdown</div>
+      <div id="status-breakdown" style="display:flex; gap:16px; flex-wrap:wrap;"></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><span class="icon">🏙️</span> Top Cities by Complaint Volume</div>
+        <div id="top-cities"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="icon">📍</span> Geographical Hotspots</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cluster</th><th>Count</th><th>Latitude</th><th>Longitude</th><th>Action</th></tr></thead>
+            <tbody id="hotspots-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">🔗</span> Semantic Duplicate Groups</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <p style="color:var(--text-muted); font-size:0.85rem;">AI clusters complaints that refer to the same underlying issue using Agglomerative Clustering on TF-IDF embeddings.</p>
+        <a href="/api/report" class="btn-export">📥 Export Full Report</a>
+      </div>
+      <div id="dup-groups"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    const COLORS = {
+      Municipal_Corporation: '#4f46e5', Public_Works: '#f97316', Water_Board: '#06b6d4',
+      Electricity: '#fbbf24', Police: '#ef4444', Health: '#10b981',
+      Transport: '#8b5cf6', Education: '#ec4899', Fire_Department: '#dc2626',
+    };
+    const PRIORITY_COLORS = { Urgent:'#ef4444', High:'#f59e0b', Normal:'#10b981', Low:'#6b7280' };
+
+    async function loadAnalytics() {
+      const data = await api('/analytics');
+
+      document.getElementById('stat-total').textContent = data.total;
+      document.getElementById('stat-urgent').textContent = data.by_priority.Urgent || 0;
+      document.getElementById('stat-resolved').textContent = data.by_status.Resolved || 0;
+
+      const maxDept = Math.max(...Object.values(data.by_department), 1);
+      document.getElementById('dept-chart').innerHTML = Object.entries(data.by_department)
+        .filter(([_,v]) => v > 0)
+        .map(([dept, val]) => `
+          <div class="bar-item">
+            <div class="bar" style="height:${(val/maxDept)*200}px; background:linear-gradient(180deg, ${COLORS[dept]||'#999'}, ${COLORS[dept]||'#999'}dd);" title="${dept}: ${val}"></div>
+            <div class="bar-label">${dept.replace(/_/g,' ').substring(0,12)}<br><strong>(${val})</strong></div>
+          </div>
+        `).join('');
+
+      const maxPrio = Math.max(...Object.values(data.by_priority), 1);
+      document.getElementById('priority-chart').innerHTML = Object.entries(data.by_priority)
+        .map(([prio, val]) => `
+          <div class="bar-item">
+            <div class="bar" style="height:${(val/maxPrio)*200}px; background:linear-gradient(180deg, ${PRIORITY_COLORS[prio]||'#999'}, ${PRIORITY_COLORS[prio]||'#999'}dd);" title="${prio}: ${val}"></div>
+            <div class="bar-label">${prio}<br><strong>(${val})</strong></div>
+          </div>
+        `).join('');
+
+      document.getElementById('status-breakdown').innerHTML = Object.entries(data.by_status)
+        .map(([status, val]) => `
+          <div style="text-align:center; flex:1; min-width:100px; padding:12px; border-radius:var(--radius-sm); background:var(--primary-light);">
+            <div style="font-size:1.8rem; font-weight:800; color:var(--primary);">${val}</div>
+            <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">${status}</div>
+          </div>
+        `).join('');
+
+      document.getElementById('top-cities').innerHTML = data.top_cities.length
+        ? data.top_cities.map((c,i) => `
+          <div class="city-list-item">
+            <div style="display:flex; align-items:center;">
+              <span class="city-rank">${i+1}</span>
+              <span style="font-weight:600;">${c.city}</span>
+            </div>
+            <strong style="color:var(--primary);">${c.count}</strong>
+          </div>`).join('')
+        : '<p style="color:var(--text-muted);">No city data available.</p>';
+
+      document.getElementById('hotspots-tbody').innerHTML = data.top_hotspots.length
+        ? data.top_hotspots.map(h => `
+          <tr>
+            <td><strong>Cluster #${h.cluster_id}</strong></td>
+            <td><strong>${h.count}</strong></td>
+            <td>${h.lat.toFixed(4)}</td>
+            <td>${h.lng.toFixed(4)}</td>
+            <td><a href="/map" class="btn btn-primary btn-sm">View →</a></td>
+          </tr>`).join('')
+        : '<tr><td colspan="5" class="empty-state">No hotspots detected.</td></tr>';
+    }
+
+    async function loadDupGroups() {
+      const data = await api('/duplicates');
+      document.getElementById('stat-dup-groups').textContent = data.groups.length;
+      const div = document.getElementById('dup-groups');
+      if (!data.groups.length) {
+        div.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div>No duplicate clusters detected.</div>';
+        return;
+      }
+      div.innerHTML = '';
+      for (const g of data.groups) {
+        const details = await Promise.all(g.complaint_ids.map(id => api(`/complaints/${id}`)));
+        const PRIORITY_ICON = {Urgent:'🔴', High:'🟡', Normal:'🟢', Low:'⚪'};
+        div.innerHTML += `
+          <div class="cluster-card">
+            <div class="cluster-header">🔗 Cluster ${g.cluster_id} — ${g.complaint_ids.length} similar complaints</div>
+            ${details.map(d => `
+              <div class="cluster-complaint">
+                <strong>#${d.id}</strong> — ${escapeHtml(d.original_text.substring(0,120))}${d.original_text.length>120?'...':''}
+                <span class="badge badge-${d.priority_label.toLowerCase()}" style="margin-left:8px;">${PRIORITY_ICON[d.priority_label]||''} ${d.priority_label}</span>
+                <span style="font-size:0.75rem; color:var(--text-muted); margin-left:4px;">${d.department.replace(/_/g,' ')}</span>
+              </div>`).join('')}
+          </div>`;
+      }
+    }
+
+    loadAnalytics();
+    loadDupGroups();
+  </script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Priority Queue — GrievanceAI</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="logo">🏛️</span>
+      <span class="brand-text">GrievanceAI</span>
+    </div>
+    <div class="navbar-links">
+      <a href="/">Submit Complaint</a>
+      <a href="/queue" class="active">Priority Queue</a>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/analytics">Analytics</a>
+      <a href="/map">GIS Map</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <h1>⚡ Priority Queue</h1>
+      <p>Complaints sorted by AI-assigned urgency. Most critical issues appear at the top — resolve them first.</p>
+    </div>
+
+    <!-- Summary -->
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card urgent">
+        <div class="stat-icon">🔴</div>
+        <div class="stat-value" id="stat-urgent">—</div>
+        <div class="stat-label">Urgent</div>
+      </div>
+      <div class="stat-card high">
+        <div class="stat-icon">🟡</div>
+        <div class="stat-value" id="stat-high">—</div>
+        <div class="stat-label">High Priority</div>
+      </div>
+      <div class="stat-card normal">
+        <div class="stat-icon">🟢</div>
+        <div class="stat-value" id="stat-normal">—</div>
+        <div class="stat-label">Normal</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-label">In Queue</div>
+      </div>
+    </div>
+
+    <!-- Queue filter -->
+    <div class="card">
+      <div class="card-title"><span class="icon">🔥</span> Action Queue — Sorted by Priority</div>
+      <div class="filters">
+        <select id="filter-priority" onchange="renderQueue()">
+          <option value="">All Priorities</option>
+          <option value="Urgent">🔴 Urgent</option>
+          <option value="High">🟡 High</option>
+          <option value="Normal">🟢 Normal</option>
+          <option value="Low">⚪ Low</option>
+        </select>
+        <select id="filter-dept" onchange="renderQueue()">
+          <option value="">All Departments</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="loadQueue()">🔄 Refresh</button>
+      </div>
+      <div id="queue-container" class="queue-list">
+        <div class="empty-state">
+          <div class="empty-icon">⏳</div>
+          <div>Loading queue...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/chatbot.js"></script>
+  <script>
+    let allQueueItems = [];
+    let departments = new Set();
+
+    async function loadQueue() {
+      const data = await api('/priority-queue');
+      allQueueItems = data.queue;
+      departments = new Set(data.queue.map(q => q.department));
+
+      // Populate dept filter
+      const deptSelect = document.getElementById('filter-dept');
+      const currentDept = deptSelect.value;
+      deptSelect.innerHTML = '<option value="">All Departments</option>';
+      [...departments].sort().forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d; opt.textContent = d.replace(/_/g, ' ');
+        deptSelect.appendChild(opt);
+      });
+      deptSelect.value = currentDept;
+
+      // Update stats
+      const counts = {Urgent: 0, High: 0, Normal: 0, Low: 0};
+      data.queue.forEach(q => counts[q.priority_label] = (counts[q.priority_label] || 0) + 1);
+      document.getElementById('stat-urgent').textContent = counts.Urgent;
+      document.getElementById('stat-high').textContent = counts.High;
+      document.getElementById('stat-normal').textContent = counts.Normal;
+      document.getElementById('stat-total').textContent = data.total;
+
+      renderQueue();
+    }
+
+    function renderQueue() {
+      const container = document.getElementById('queue-container');
+      const prioFilter = document.getElementById('filter-priority').value;
+      const deptFilter = document.getElementById('filter-dept').value;
+
+      let items = allQueueItems;
+      if (prioFilter) items = items.filter(q => q.priority_label === prioFilter);
+      if (deptFilter) items = items.filter(q => q.department === deptFilter);
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">✅</div>
+            <div>No complaints in queue. Either everything is resolved or no complaints match the filter.</div>
+          </div>`;
+        return;
+      }
+
+      const PRIORITY_ICON = {Urgent: '🔴', High: '🟡', Normal: '🟢', Low: '⚪'};
+
+      container.innerHTML = items.map(q => `
+        <div class="queue-item priority-${q.priority_label.toLowerCase()}">
+          <div class="queue-rank">#${q.rank}</div>
+          <div class="queue-content">
+            <div class="queue-text">${escapeHtml(q.text.substring(0, 120))}${q.text.length > 120 ? '...' : ''}</div>
+            <div class="queue-meta">
+              ${q.department.replace(/_/g, ' ')} · ${q.city || 'N/A'} · ${formatDate(q.created_at)}
+              ${q.duplicate_of ? `· <span class="duplicate-tag">Dup of #${q.duplicate_of}</span>` : ''}
+            </div>
+          </div>
+          <div class="queue-actions">
+            <span class="badge badge-${q.priority_label.toLowerCase()}">${PRIORITY_ICON[q.priority_label]||''} ${q.priority_label}</span>
+            <span style="font-size:0.72rem; color:var(--text-muted); font-weight:700;">${q.priority_score}/100</span>
+            <select class="status-select" onchange="updateStatus(${q.id}, this.value)">
+              <option ${q.status==='Submitted'?'selected':''}>Submitted</option>
+              <option ${q.status==='Acknowledged'?'selected':''}>Acknowledged</option>
+              <option ${q.status==='In Progress'?'selected':''}>In Progress</option>
+              <option ${q.status==='Resolved'?'selected':''}>Resolved</option>
+            </select>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function updateStatus(id, status) {
+      await api(`/complaints/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      loadQueue();
+    }
+
+    loadQueue();
+  </script>
+</body>
+</html>
